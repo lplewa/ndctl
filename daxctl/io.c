@@ -20,9 +20,9 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <emmintrin.h>
 #include <limits.h>
 #include <libgen.h>
-#include <libpmem.h>
 #include <util/json.h>
 #include <util/filter.h>
 #include <util/size.h>
@@ -357,6 +357,20 @@ static int clear_badblocks(struct io_dev *dev, uint64_t len)
 	return 0;
 }
 
+#define FLUSH_ALIGN 64
+
+static void clflush(const void *addr, size_t len)
+{
+	/*
+	 * Loop through cache-line-size (typically 64B) aligned chunks
+	 * covering the given range.
+	 */
+	for (uintptr_t uptr = (uintptr_t)addr & ~(FLUSH_ALIGN - 1);
+	     uptr < (uintptr_t)addr + len; uptr += FLUSH_ALIGN)
+		_mm_clflush((char *)uptr);
+	_mm_sfence();
+}
+
 static int64_t __do_io(struct io_dev *dst_dev, struct io_dev *src_dev,
 		uint64_t len, bool zero)
 {
@@ -366,12 +380,13 @@ static int64_t __do_io(struct io_dev *dst_dev, struct io_dev *src_dev,
 	if (zero && dst_dev->is_dax) {
 		dst = (uint8_t *)dst_dev->mmap + dst_dev->offset;
 		memset(dst, 0, len);
-		pmem_persist(dst, len);
+		clflush(dst, len);
 		rc = len;
 	} else if (dst_dev->is_dax && src_dev->is_dax) {
 		src = (uint8_t *)src_dev->mmap + src_dev->offset;
 		dst = (uint8_t *)dst_dev->mmap + dst_dev->offset;
-		pmem_memcpy_persist(dst, src, len);
+		memcpy(dst, src, len);
+		clflush(dst, len);
 		rc = len;
 	} else if (src_dev->is_dax) {
 		src = (uint8_t *)src_dev->mmap + src_dev->offset;
@@ -422,7 +437,7 @@ static int64_t __do_io(struct io_dev *dst_dev, struct io_dev *src_dev,
 				break;
 			count += rc;
 		} while (count != (ssize_t)len);
-		pmem_persist(dst, count);
+		clflush(dst, count);
 		rc = count;
 		if (rc != (ssize_t)len)
 			printf("Requested size %lu larger than destination.\n", len);

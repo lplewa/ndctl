@@ -5,11 +5,8 @@ bin_PROGRAMS = daxctl
 daxctl_SOURCES =\
 		daxctl.c \
 		list.c \
-		../util/json.c
-
-if ENABLE_DAXIO
-daxctl_SOURCES += io.c
-endif
+		../util/json.c \
+		io.c
 
 daxctl_LDADD =\
 	lib/libdaxctl.la \
@@ -17,7 +14,3 @@ daxctl_LDADD =\
 	../libutil.a \
 	$(UUID_LIBS) \
 	$(JSON_LIBS)
-
-if ENABLE_DAXIO
-daxctl_LDADD += $(PMEM_LIBS)
-endif
